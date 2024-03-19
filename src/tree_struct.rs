@@ -1,23 +1,30 @@
 extern crate rand;
 
+use std::cmp::{min, Ordering};
 use std::f32::consts::PI;
 use rand::{Rng, SeedableRng};
 use rand::rngs::StdRng;
 use crate::tree_struct::TreeE::{Bud, Segment};
 
-const MAX_MAIN_ANGLE_DELTA: f32 = PI / 6.0;
-const BASE_BRANCH_ANGLE: f32 = PI / 4.0;
-const MAX_BRANCH_ANGLE_DELTA: f32 = PI / 6.0;
-const ANGLE_TO_UP_FORCE: f32 = 0.06;
+const MAX_MAIN_ANGLE_DELTA: f32 = PI / 6.4;
+const BASE_BRANCH_ANGLE: f32 = PI / 5.0;
+const MAX_BRANCH_ANGLE_DELTA: f32 = PI / 5.0;
+const ANGLE_TO_UP_FORCE: f32 = 0.16;
 
-const GROW_SPEED: f32 = 6.0;
-const THIN_UP_SPEED: f32 = 1.5;
+const GROW_SPEED: f32 = 20.0;
+const THIN_UP_SPEED: f32 = 3.6;
 
+const DELTA: f32 = 0.032;
+const PERIOD: f32 = 1.6;
+
+fn get_h_coff(h: usize) -> f32{
+    1.0 / (h as f32 + 2.0).log2()
+}
 
 fn angle_to_up(angle: f32, force: f32) -> f32{
-    let new_sin = angle.sin() + force;
-    if new_sin > 1.0{
-        return PI / 2.0
+    let new_sin = angle.sin() - force;
+    if new_sin < -1.0{
+        return -PI / 2.0
     }
     ((1.0 - new_sin.powi(2)).sqrt() * angle.cos().signum()).acos() * new_sin.signum()
 }
@@ -26,22 +33,7 @@ fn rand_to_coff(rand: f32) -> f32{
     0.5 * (rand * 2.0 - 1.0).powi(3)
 }
 
-pub fn test() -> Tree{
-    let mut ang = 0.0;
-    let mut ang2 = PI;
-    for i in 0..5{
-        //println!("{ang} {ang2}");
-        ang = angle_to_up(ang, 0.08);
-        ang2 = angle_to_up(ang2, 0.08);
-    }
 
-    let mut tr = Tree::new();
-    for i in 0..128{
-        tr.update();
-    }
-    tr.printthis();
-    return tr;
-}
 
 
 #[derive(Clone, Debug)]
@@ -127,14 +119,21 @@ impl TreeE{
         'F'
     }
 
-    fn update(&mut self, delta: f32){
+    fn update(&mut self, delta: f32, state: &UpdaterState){
         match self {
             TreeE::OpBracket => {}
             TreeE::ClBracket => {}
             Segment { length, thickness, angle, lifetime, is_trunk, energy, force } => {
+                let mut new_tnick = *thickness + delta * THIN_UP_SPEED * *force * get_h_coff(state.h);
+                if let Some(thick_barier) = state.thickness{
+                    if thick_barier < new_tnick{
+                        new_tnick = *thickness;
+                    }
+                }
+
                 *self = Segment {
-                    length: *length + delta * GROW_SPEED * *force,
-                    thickness: *thickness + delta * THIN_UP_SPEED * *force,
+                    length: *length + delta * GROW_SPEED * *force * get_h_coff(state.h),
+                    thickness: new_tnick,
                     angle: *angle,
                     lifetime: *lifetime + delta,
                     is_trunk: *is_trunk,
@@ -154,16 +153,46 @@ impl TreeE{
             TreeE::Flower => {}
         }
     }
-    fn transform(&self, rand_gen: &mut rand::rngs::StdRng) -> Vec<TreeE> {
+
+    fn update_state(
+        &mut self, state: &mut UpdaterState,
+        stack: &mut Vec<UpdaterState>, brackets: &mut Vec<usize>){
+        match self{
+            TreeE::OpBracket => {
+                brackets.push(state.h);
+            }
+            TreeE::ClBracket => {
+                if let Some(old_h) = brackets.pop(){
+                    let mut find = false;
+                    while (state.h != old_h) && !stack.is_empty(){
+                        if let Some(new_state) = stack.pop(){
+                            *state = new_state;
+                        }
+                    }
+                }
+            }
+            Segment { angle, thickness, .. } => {
+                stack.push(state.clone());
+                state.angle += *angle;
+                state.thickness = Some(*thickness);
+                state.h += 1;
+                state.parent = self.clone();
+            }
+            Bud { .. } => {}
+            TreeE::Flower => {}
+        }
+    }
+
+    fn transform(&self, rand_gen: &mut rand::rngs::StdRng, state: &UpdaterState) -> Vec<TreeE> {
         //наверно передовать и направление роста
         let probab = rand_gen.gen_range(0.0..1.0);
         //println!("{probab}");
         let mut result: Vec<TreeE> = Vec::new();
         match self{
             TreeE::Bud { energy, .. } => {
-                if *energy >= 1.0{
+                if *energy >= PERIOD{
                     match probab {
-                        0.0..=0.6 => {
+                        0.0..=0.05 => {
                             result.push(TreeE::new_segment_from_bud(
                                 self.clone(),
                                 1.0 + rand_to_coff(rand_gen.gen_range(0.0..1.0))));
@@ -178,10 +207,7 @@ impl TreeE{
                             //Второе, что создаётся сразу же, это основная ветвь
                             //to branch
                         },
-                        0.4..=0.6 => {
-                            //to flower
-                        },
-                        0.6..=0.7 => {
+                        0.3..=0.301 => {
                             //death
                         }
                         _ => {
@@ -202,9 +228,9 @@ impl TreeE{
                 energy,
                 force,
             } => {
-                if *energy >= 1.0{
+                if *energy >= PERIOD{
                     match probab {
-                        0.0..=0.4 => {
+                        0.0..=0.1 => {
 
                             //println!("new_seg");
                             result.push(TreeE::Segment {
@@ -214,13 +240,13 @@ impl TreeE{
                                 lifetime: *lifetime,
                                 is_trunk: true,
                                 energy: 0.0,
-                                force: force * 0.5,
+                                force: force * 0.2,
                             });
                             //result.push(TreeE::new_segment(0.0));
                             //Следующий сегмент, по направлению он должен стремится к тому,
                             // чтобы расти вверх, но не слишком резко и с рандомными отклонениями
 
-                            let new_base_angle = angle_to_up(*angle, ANGLE_TO_UP_FORCE);
+                            let new_base_angle = angle_to_up(state.angle, ANGLE_TO_UP_FORCE) - state.angle;
                             let main_angle = new_base_angle + MAX_MAIN_ANGLE_DELTA *
                                 rand_to_coff(rand_gen.gen_range(0.0..1.0)) * 2.0;
                             let branch_angle = new_base_angle + BASE_BRANCH_ANGLE * -main_angle.signum() +
@@ -261,14 +287,18 @@ pub struct Tree{
     rand_gen: rand::rngs::StdRng,
 }
 
-struct StackE{
-
+#[derive(Clone)]
+struct UpdaterState{
+    angle: f32,
+    h: usize,
+    parent: TreeE,
+    thickness: Option<f32>,
 }
 impl Tree {
-    fn new() -> Tree{
+    pub fn new(seed: [u8; 32]) -> Tree{
         Tree{
             l_system: vec![TreeE::new_segment(1.0, 0.0)],
-            rand_gen: StdRng::from_seed([128; 32]),
+            rand_gen: StdRng::from_seed(seed),
         }
     }
     fn printthis(&self){
@@ -285,11 +315,21 @@ impl Tree {
     }
 
     pub fn update(&mut self){
-        let mut stack = 0.0;
         let mut new_l: Vec<TreeE> = Vec::new();
+
+        let mut state: UpdaterState = UpdaterState{
+            angle: -0.5 * PI,
+            h: 0,
+            parent: TreeE::OpBracket,
+            thickness: None,
+        };
+        let mut stack: Vec<UpdaterState> = Vec::new();
+        let mut brackets_stack: Vec<usize> = Vec::new();
+
         for ch in &mut self.l_system {
-            ch.update(0.02);
-            new_l.append(&mut ch.transform(&mut self.rand_gen));
+            ch.update(DELTA, &state);
+            new_l.append(&mut ch.transform(&mut self.rand_gen, &state));
+            ch.update_state(&mut state, &mut stack, &mut brackets_stack);
         }
         self.l_system = new_l;
     }
