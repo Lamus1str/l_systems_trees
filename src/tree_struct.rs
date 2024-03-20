@@ -53,12 +53,6 @@ pub enum TreeE{
 }
 
 impl TreeE{
-    fn new_char(ch: char) -> TreeE{
-        TreeE::OpBracket
-    }
-    fn segment_force_from_noise(noise: f32) -> f32{
-        0.0
-    }
     fn new_segment_from_bud(bud: TreeE, force: f32) -> TreeE{
         if let TreeE::Bud {
             angle, ..
@@ -94,29 +88,6 @@ impl TreeE{
             sheet_angle,
             sheet_size: 0.0
         }
-    }
-    fn new_trunk() -> TreeE{
-        TreeE::OpBracket
-    }
-    fn from_char(ch: char, from: TreeE) -> TreeE{
-        match ch {
-            't' => {
-                //Branch
-            }
-            'T' => {
-                //Trunk
-            }
-            'B' => {
-                //Bud
-            }
-            _ => {
-
-            }
-        }
-        TreeE::OpBracket
-    }
-    fn get_char(&self) -> char{
-        'F'
     }
 
     fn update(&mut self, delta: f32, state: &UpdaterState){
@@ -231,8 +202,6 @@ impl TreeE{
                 if *energy >= PERIOD{
                     match probab {
                         0.0..=0.1 => {
-
-                            //println!("new_seg");
                             result.push(TreeE::Segment {
                                 angle: *angle,
                                 length: *length,
@@ -242,10 +211,6 @@ impl TreeE{
                                 energy: 0.0,
                                 force: force * 0.2,
                             });
-                            //result.push(TreeE::new_segment(0.0));
-                            //Следующий сегмент, по направлению он должен стремится к тому,
-                            // чтобы расти вверх, но не слишком резко и с рандомными отклонениями
-
                             let new_base_angle = angle_to_up(state.angle, ANGLE_TO_UP_FORCE) - state.angle;
                             let main_angle = new_base_angle + MAX_MAIN_ANGLE_DELTA *
                                 rand_to_coff(rand_gen.gen_range(0.0..1.0)) * 2.0;
@@ -276,9 +241,7 @@ impl TreeE{
                 result.push(self.clone())
             }
         }
-        //println!("{:?}", result);
         result
-
     }
 }
 
